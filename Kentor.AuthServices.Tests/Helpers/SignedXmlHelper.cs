@@ -33,12 +33,24 @@ namespace Kentor.AuthServices.Tests.Helpers
                 (new X509SecurityToken(TestCertSignOnly))
                 .CreateKeyIdentifierClause<X509RawDataKeyIdentifierClause>()));
 
-        public static string SignXml(string xml, bool includeKeyInfo = false, bool preserveWhitespace = true)
+        public static string SignXml(
+            string xml,
+            bool includeKeyInfo = false,
+            bool preserveWhitespace = true,
+            string signingAlgorithmName = null)
         {
-            var xmlDoc = new XmlDocument { PreserveWhitespace = preserveWhitespace };
+            var xmlDoc = XmlHelpers.CreateSafeXmlDocument();
+            xmlDoc.PreserveWhitespace = preserveWhitespace;
             xmlDoc.LoadXml(xml);
 
-            xmlDoc.Sign(TestCert, includeKeyInfo);
+            if(string.IsNullOrEmpty(signingAlgorithmName))
+            {
+                xmlDoc.Sign(TestCert, includeKeyInfo);
+            }
+            else
+            {
+                xmlDoc.Sign(TestCert, includeKeyInfo, signingAlgorithmName);
+            }
 
             return xmlDoc.OuterXml;
         }        
@@ -50,7 +62,7 @@ namespace Kentor.AuthServices.Tests.Helpers
                 certificate = TestCert2;
             }
 
-            var xmlDoc = new XmlDocument { PreserveWhitespace = true };
+            var xmlDoc = XmlHelpers.CreateSafeXmlDocument();
             var wrappedAssertion = $@"<saml2:EncryptedAssertion xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion"">{assertionXml}</saml2:EncryptedAssertion>";
             xmlDoc.LoadXml(wrappedAssertion);
             var elementToEncrypt = (XmlElement)xmlDoc.GetElementsByTagName("Assertion", Saml2Namespaces.Saml2Name)[0];

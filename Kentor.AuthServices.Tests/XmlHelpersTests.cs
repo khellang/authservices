@@ -11,6 +11,11 @@ using System.Reflection;
 using Kentor.AuthServices.Configuration;
 using System.Collections.Generic;
 using System.Linq;
+using Kentor.AuthServices;
+using Kentor.AuthServices.Saml2P;
+using System.Xml.Linq;
+using System.IdentityModel.Tokens;
+using Kentor.AuthServices.Internal;
 
 namespace Kentor.AuthServices.Tests
 {
@@ -30,6 +35,15 @@ namespace Kentor.AuthServices.Tests
         {
             XmlDocument xd = null;
             Action a = () => xd.Sign(TestCert);
+
+            a.ShouldThrow<ArgumentNullException>().And.ParamName.Should().Be("xmlDocument");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_Sign_Nullhceck_XmlDocument2()
+        {
+            XmlDocument xd = null;
+            Action a = () => xd.Sign(TestCert, false, "");
 
             a.ShouldThrow<ArgumentNullException>().And.ParamName.Should().Be("xmlDocument");
         }
@@ -55,8 +69,8 @@ namespace Kentor.AuthServices.Tests
         [TestMethod]
         public void XmlHelpers_Sign()
         {
-            var xmlDoc = new XmlDocument();
-            xmlDoc.LoadXml("<root ID=\"rootElementId\"><content>Some Content</content></root>");
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(
+                "<root ID=\"rootElementId\"><content>Some Content</content></root>");
 
             xmlDoc.Sign(TestCert);
 
@@ -66,13 +80,21 @@ namespace Kentor.AuthServices.Tests
                 ["Reference", SignedXml.XmlDsigNamespaceUrl].Attributes["URI"].Value
                 .Should().Be("#rootElementId");
 
+            // Default algorithms in SignedXml are rsa-sha1 and sha1. Default
+            // in authservices are rsa-sha256 and sha256. Ensure AuthServices
+            // defaults are used and not SignedXml/.NET defaults.
+            signature["SignedInfo"]["SignatureMethod"].GetAttribute("Algorithm")
+                .Should().Be(SignedXml.XmlDsigRSASHA256Url);
+            signature["SignedInfo"]["Reference"]["DigestMethod"].GetAttribute("Algorithm")
+                .Should().Be(SignedXml.XmlDsigSHA256Url);
+
             var signedXml = new SignedXml(xmlDoc);
             signedXml.LoadXml(signature);
             signedXml.CheckSignature(TestCert, true).Should().BeTrue();
         }
 
         const string xmlString = "<xml a=\"b\">\n  <indented>content</indented>\n</xml>";
-        readonly XmlDocument xmlDocument = XmlHelpers.FromString(xmlString);
+        readonly XmlDocument xmlDocument = XmlHelpers.XmlDocumentFromString(xmlString);
 
         [TestMethod]
         public void XmlHelpers_FromString()
@@ -101,7 +123,7 @@ namespace Kentor.AuthServices.Tests
         [TestMethod]
         public void XmlHelpers_RemoveChild_NullcheckXmlElement()
         {
-            new XmlDocument().DocumentElement.Invoking(
+            XmlHelpers.CreateSafeXmlDocument().DocumentElement.Invoking(
                 e => e.RemoveChild("name", "ns"))
                 .ShouldThrow<ArgumentNullException>()
                 .And.ParamName.Should().Be("xmlElement");
@@ -145,7 +167,7 @@ namespace Kentor.AuthServices.Tests
         public void XmlHelpers_IsSignedBy()
         {
             var xml = "<xml ID=\"someID\"><content>text</content></xml>";
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
             xmlDoc.Sign(SignedXmlHelper.TestCert);
 
             xmlDoc.DocumentElement.IsSignedBy(SignedXmlHelper.TestCert).Should().BeTrue();
@@ -155,7 +177,7 @@ namespace Kentor.AuthServices.Tests
         public void XmlHelpers_IsSignedBy_ThrowsOnWrongCert()
         {
             var xml = "<xml ID=\"someID\"><content>text</content></xml>";
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
             xmlDoc.Sign(SignedXmlHelper.TestCert2, true);
 
             xmlDoc.DocumentElement.Invoking(
@@ -168,7 +190,7 @@ namespace Kentor.AuthServices.Tests
         public void XmlHelpers_IsSignedBy_ThrowsOnTamperedData()
         {
             var xml = "<xml ID=\"someID\"><content>text</content></xml>";
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
             xmlDoc.Sign(SignedXmlHelper.TestCert);
 
             xmlDoc.DocumentElement["content"].InnerText = "changedText";
@@ -184,7 +206,7 @@ namespace Kentor.AuthServices.Tests
         {
             var xml = "<xml ID=\"someID\"><content ID=\"content1\">text</content>"
                 + "<injected>other text</injected></xml>";
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
             xmlDoc.DocumentElement["content"].Sign(SignedXmlHelper.TestCert, false);
 
@@ -206,7 +228,7 @@ namespace Kentor.AuthServices.Tests
         public void XmlHelpers_IsSignedBy_FalseOnMissingSignature()
         {
             var xml = "<xml ID=\"someID\"><content>text</content></xml>";
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
             xmlDoc.DocumentElement.IsSignedBy(SignedXmlHelper.TestCert).Should().BeFalse();
         }
@@ -216,7 +238,7 @@ namespace Kentor.AuthServices.Tests
         {
             var signedWithoutReference = @"<saml2p:Response xmlns:saml2p=""urn:oasis:names:tc:SAML:2.0:protocol"" xmlns:saml2=""urn:oasis:names:tc:SAML:2.0:assertion"" ID=""Saml2Response_Validate_FalseOnMissingReference"" Version=""2.0"" IssueInstant=""2013-01-01T00:00:00Z""><saml2:Issuer>https://idp.example.com</saml2:Issuer><saml2p:Status><saml2p:StatusCode Value=""urn:oasis:names:tc:SAML:2.0:status:Requester"" /></saml2p:Status><Signature xmlns=""http://www.w3.org/2000/09/xmldsig#""><SignedInfo><CanonicalizationMethod Algorithm=""http://www.w3.org/TR/2001/REC-xml-c14n-20010315"" /><SignatureMethod Algorithm=""http://www.w3.org/2000/09/xmldsig#rsa-sha1"" /></SignedInfo><SignatureValue>tYFIoYmrzmp3H7TXm9IS8DW3buBZIb6sI2ycrn+AOnVcdYnPTJpk3ntHlqQKXNEyXgXZNdqEuFpgI1I0P0TlhM+C3rBJnflkApkxZkak5RwnJzDWTHpsSDjYcm+/XgBy3JVZJuMWb2YPaV8GB6cjBMDrENUEaoKRg+FpzPUZO1EOMcqbocXp5cHie1CkPnD1OtT/cuzMBUMpBGZMxjZwdFpOO7R3CUXh/McxKfoGUQGC3DVpt5T8uGkpj4KqZVPS/qTCRhbPRDjg73BdWbdkFpFWge8G/FgkYxr9LBE1TsrxptppO9xoA5jXwJVZaWndSMvo6TuOjUgqY2w5RTkqhA==</SignatureValue></Signature></saml2p:Response>";
 
-            var xmlDoc = XmlHelpers.FromString(signedWithoutReference);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(signedWithoutReference);
 
             xmlDoc.DocumentElement.Invoking(
                 x => x.IsSignedBy(SignedXmlHelper.TestCert))
@@ -229,7 +251,7 @@ namespace Kentor.AuthServices.Tests
         {
             var xml = "<xml ID=\"myxml\" />";
 
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
             var signedXml = new SignedXml(xmlDoc);
             signedXml.SigningKey = (RSACryptoServiceProvider)SignedXmlHelper.TestCert.PrivateKey;
@@ -257,14 +279,17 @@ namespace Kentor.AuthServices.Tests
         [TestMethod]
         public void XmlHelpers_IsSignedBy_ThrowsInformativeMessageOnSha256Signature()
         {
+            // With .Net 4.6.2 and above this test will not throw any error because the SHA256 is now built-in
+            if ( CryptoConfig.CreateFromName( "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" ) != null ) return;
+
             var xmlSignedWithSha256 = @"<Assertion ID=""Saml2Response_GetClaims_ThrowsInformativeExceptionForSha256"" IssueInstant=""2015-03-13T20:43:07.330Z"" Version=""2.0"" xmlns=""urn:oasis:names:tc:SAML:2.0:assertion""><Issuer>https://idp.example.com</Issuer><Signature xmlns=""http://www.w3.org/2000/09/xmldsig#""><SignedInfo><CanonicalizationMethod Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /><SignatureMethod Algorithm=""http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"" /><Reference URI=""#Saml2Response_GetClaims_ThrowsInformativeExceptionForSha256""><Transforms><Transform Algorithm=""http://www.w3.org/2000/09/xmldsig#enveloped-signature"" /><Transform Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /></Transforms><DigestMethod Algorithm=""http://www.w3.org/2001/04/xmlenc#sha256"" /><DigestValue>F+E7u3vqMC07ipvP9AowsMqP7y6CsAC0GeEIxNSwDEI=</DigestValue></Reference></SignedInfo><SignatureValue>GmiXn24Ccnr64TbmDd1/nLM+891z0FtRHSpU8+75uOqbpNK/ZZGrltFf2YZ5u9b9O0HfbFFsZ0i28ocwAZOv2UfxQrCtOGf3ss7Q+t2Zmc6Q/3ES7HIa15I5BbaSdNfpOMlX6N1XXhMprRGy2YWMr5IAIhysFG1A2oHaC3yFiesfUrawN/lXUYuI22Kf4A5bmnIkKijnwX9ewnhRj6569bw+c6q+tVZSHQzI+KMU9KbKN4NsXxAmv6dM1w2qOiX9/CO9LzwEtlhA9yo3sl0uWP8z5GwK9qgOlsF2NdImAQ5f0U4Uv26doFn09W+VExFwNhcXhewQUuPBYBr+XXzdww==</SignatureValue><KeyInfo><X509Data><X509Certificate>MIIDIzCCAg+gAwIBAgIQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAMCQxIjAgBgNVBAMTGUtlbnRvci5BdXRoU2VydmljZXMuVGVzdHMwHhcNMTMwOTI1MTMzNTQ0WhcNMzkxMjMxMjM1OTU5WjAkMSIwIAYDVQQDExlLZW50b3IuQXV0aFNlcnZpY2VzLlRlc3RzMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwVGpfvK9N//MnA5Jo1q2liyPR24406Dp25gv7LB3HK4DWgqsb7xXM6KIV/WVOyCV2g/O1ErBlB+HLhVZ4XUJvbqBbgAJqFO+TZwcCIe8u4nTEXeU660FdtkKClA17sbtMrAGdDfOPwVBHSuavdHeD7jHNI4RUDGKnEW13/0EvnHDilIetwODRxrX/+41R24sJThFbMczByS3OAL2dcIxoAynaGeM90gXsVYow1QhJUy21+cictikb7jW4mW6dvFCBrWIceom9J295DcQIHoxJy5NoZwMir/JV00qs1wDVoN20Ve1DC5ImwcG46XPF7efQ44yLh2j5Yexw+xloA81dwIDAQABo1kwVzBVBgNVHQEETjBMgBAWIahoZhXVUogbAqkS7zwfoSYwJDEiMCAGA1UEAxMZS2VudG9yLkF1dGhTZXJ2aWNlcy5UZXN0c4IQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAA4IBAQA2aGzmuKw4AYXWMhrGj5+i8vyAoifUn1QVOFsUukEA77CrqhqqaWFoeagfJp/45vlvrfrEwtF0QcWfmO9w1VvHwm7sk1G/cdYyJ71sU+llDsdPZm7LxQvWZYkK+xELcinQpSwt4ExavS+jLcHoOYHYwIZMBn3U8wZw7Kq29oGnoFQz7HLCEl/G9i3QRyvFITNlWTjoScaqMjHTzq6HCMaRsL09DLcY3KB+cedfpC0/MBlzaxZv0DctTulyaDfM9DCYOyokGN/rQ6qkAR0DDm8fVwknbJY7kURXNGoUetulTb5ow8BvD1gncOaYHSD0kbHZG+bLsUZDFatEr2KW8jbG</X509Certificate></X509Data></KeyInfo></Signature><Subject><NameID>SomeUser</NameID><SubjectConfirmation Method=""urn:oasis:names:tc:SAML:2.0:cm:bearer"" /></Subject><Conditions NotOnOrAfter=""2100-01-01T05:00:00.000Z"" /></Assertion>";
 
-            var xmlDoc = XmlHelpers.FromString(xmlSignedWithSha256);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xmlSignedWithSha256);
 
             xmlDoc.DocumentElement.Invoking(
-                x => x.IsSignedBy(SignedXmlHelper.TestCert))
+                x => x.IsSignedBy(SignedXmlHelper.TestCertSignOnly))
                 .ShouldThrow<InvalidSignatureException>()
-                .And.Message.Should().Be("SHA256 signatures require the algorithm to be registered at the process level. Call Kentor.AuthServices.Configuration.Options.GlobalEnableSha256XmlSignatures() on startup to register.");
+                .And.Message.Should().Be("SHA256 signatures require the algorithm to be registered at the process level. Upgrade to .Net 4.6.2 or call Kentor.AuthServices.Configuration.Options.GlobalEnableSha256XmlSignatures() on startup to register.");
         }
 
         [TestMethod]
@@ -275,7 +300,7 @@ namespace Kentor.AuthServices.Tests
             var xml = @"<Assertion ID=""Saml2Response_GetClaims_FailsSha256WhenChanged"" IssueInstant=""2015-03-13T20:44:00.791Z"" Version=""2.0"" xmlns=""urn:oasis:names:tc:SAML:2.0:assertion""><Issuer>https://idp.example.com</Issuer><Signature xmlns=""http://www.w3.org/2000/09/xmldsig#""><SignedInfo><CanonicalizationMethod Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /><SignatureMethod Algorithm=""http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"" /><Reference URI=""#Saml2Response_GetClaims_FailsSha256WhenChanged""><Transforms><Transform Algorithm=""http://www.w3.org/2000/09/xmldsig#enveloped-signature"" /><Transform Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /></Transforms><DigestMethod Algorithm=""http://www.w3.org/2001/04/xmlenc#sha256"" /><DigestValue>BKRyWqweAczLA8fgRcx6zzMDiP0qT0TwqU/X4VgLiXM=</DigestValue></Reference></SignedInfo><SignatureValue>iK8s+MkLlixSSQu5Q/SHRZLhfnj4jlyPLAD6C2n9zmQu4CosZME7mxiNFiWyOE8XRGd+2LJle+NjJrkZFktVb03JaToq7w4Q8GfJ2oUUjNCweoaJ6NzsnwkFoXhyh0dfOixl/Ifa3qDX50/Hv2twF/QXfDs08GZTxZKehKsVDITyVd6nytF8VUb0+nU7UMWPn1XeHM7YNI/1mkVbCRx/ci5ZRxwjAX40xttd4JL6oBnp5oaaMgWpAa2cVb+t/9HhCRThEho1etbPHx/+E9ElL1PhKqKX6nh2GSH1TFJkwEXIPPZKqCs3YDINLBZpLfl626zbV4cGOGyWUAroVsk2uw==</SignatureValue><KeyInfo><X509Data><X509Certificate>MIIDIzCCAg+gAwIBAgIQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAMCQxIjAgBgNVBAMTGUtlbnRvci5BdXRoU2VydmljZXMuVGVzdHMwHhcNMTMwOTI1MTMzNTQ0WhcNMzkxMjMxMjM1OTU5WjAkMSIwIAYDVQQDExlLZW50b3IuQXV0aFNlcnZpY2VzLlRlc3RzMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwVGpfvK9N//MnA5Jo1q2liyPR24406Dp25gv7LB3HK4DWgqsb7xXM6KIV/WVOyCV2g/O1ErBlB+HLhVZ4XUJvbqBbgAJqFO+TZwcCIe8u4nTEXeU660FdtkKClA17sbtMrAGdDfOPwVBHSuavdHeD7jHNI4RUDGKnEW13/0EvnHDilIetwODRxrX/+41R24sJThFbMczByS3OAL2dcIxoAynaGeM90gXsVYow1QhJUy21+cictikb7jW4mW6dvFCBrWIceom9J295DcQIHoxJy5NoZwMir/JV00qs1wDVoN20Ve1DC5ImwcG46XPF7efQ44yLh2j5Yexw+xloA81dwIDAQABo1kwVzBVBgNVHQEETjBMgBAWIahoZhXVUogbAqkS7zwfoSYwJDEiMCAGA1UEAxMZS2VudG9yLkF1dGhTZXJ2aWNlcy5UZXN0c4IQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAA4IBAQA2aGzmuKw4AYXWMhrGj5+i8vyAoifUn1QVOFsUukEA77CrqhqqaWFoeagfJp/45vlvrfrEwtF0QcWfmO9w1VvHwm7sk1G/cdYyJ71sU+llDsdPZm7LxQvWZYkK+xELcinQpSwt4ExavS+jLcHoOYHYwIZMBn3U8wZw7Kq29oGnoFQz7HLCEl/G9i3QRyvFITNlWTjoScaqMjHTzq6HCMaRsL09DLcY3KB+cedfpC0/MBlzaxZv0DctTulyaDfM9DCYOyokGN/rQ6qkAR0DDm8fVwknbJY7kURXNGoUetulTb5ow8BvD1gncOaYHSD0kbHZG+bLsUZDFatEr2KW8jbG</X509Certificate></X509Data></KeyInfo></Signature><Subject><NameID>SomeUser</NameID><SubjectConfirmation Method=""urn:oasis:names:tc:SAML:2.0:cm:bearer"" /></Subject><Conditions NotOnOrAfter=""2100-01-01T05:00:00.000Z"" /></Assertion>";
             xml = xml.Replace("SomeUser", "OtherUser");
 
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
             xmlDoc.DocumentElement.Invoking(
                 x => x.IsSignedBy(SignedXmlHelper.TestCert))
@@ -293,7 +318,7 @@ namespace Kentor.AuthServices.Tests
 
             var xml = "<xml ID=\"MyXml\" />";
 
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
             var signedXml = new SignedXml(xmlDoc);
             signedXml.SigningKey = (RSACryptoServiceProvider)SignedXmlHelper.TestCert.PrivateKey;
@@ -325,13 +350,25 @@ $@"<xml>
     {content2}
 </xml>";
 
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
             ((XmlElement)xmlDoc.SelectSingleNode("//*[@ID=\"c1\"]")).IsSignedBy(SignedXmlHelper.TestCert)
                 .Should().BeTrue("first content is correclty signed");
 
             ((XmlElement)xmlDoc.SelectSingleNode("//*[@ID=\"c2\"]")).IsSignedBy(SignedXmlHelper.TestCert)
                 .Should().BeTrue("second content is correclty signed");
+        }
+
+        class StubKeyIdentifier : SecurityKeyIdentifierClause
+        {
+            public StubKeyIdentifier() : base("Stub")
+            {
+            }
+
+            public override SecurityKey CreateKey()
+            {
+                throw new CryptographicException("Stub key identifier throwing");
+            }
         }
 
         [TestMethod]
@@ -343,13 +380,76 @@ $@"<xml>
             // does NOT flag this as a problem with the sha256 signature algorithm 
             // (they both throw CryptographicException)
             var xml =
-                @"<Assertion ID=""Saml2Response_GetClaims_DoesNotThrowSha256MessageForOtherProblem_Assertion"" IssueInstant=""2015-03-13T20:43:07.330Z"" Version=""2.0"" xmlns=""urn:oasis:names:tc:SAML:2.0:assertion""><Issuer>https://idp.example.com</Issuer><Signature xmlns=""http://www.w3.org/2000/09/xmldsig#""><SignedInfo><CanonicalizationMethod Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /><SignatureMethod Algorithm=""http://www.w3.org/2001/04/xmldsig-more#SomeInvalidName"" /><Reference URI=""#Saml2Response_GetClaims_DoesNotThrowSha256MessageForOtherProblem_Assertion""><Transforms><Transform Algorithm=""http://www.w3.org/2000/09/xmldsig#enveloped-signature"" /><Transform Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /></Transforms><DigestMethod Algorithm=""http://www.w3.org/2001/04/xmlenc#sha256"" /><DigestValue>F+E7u3vqMC07ipvP9AowsMqP7y6CsAC0GeEIxNSwDEI=</DigestValue></Reference></SignedInfo><SignatureValue>GmiXn24Ccnr64TbmDd1/nLM+891z0FtRHSpU8+75uOqbpNK/ZZGrltFf2YZ5u9b9O0HfbFFsZ0i28ocwAZOv2UfxQrCtOGf3ss7Q+t2Zmc6Q/3ES7HIa15I5BbaSdNfpOMlX6N1XXhMprRGy2YWMr5IAIhysFG1A2oHaC3yFiesfUrawN/lXUYuI22Kf4A5bmnIkKijnwX9ewnhRj6569bw+c6q+tVZSHQzI+KMU9KbKN4NsXxAmv6dM1w2qOiX9/CO9LzwEtlhA9yo3sl0uWP8z5GwK9qgOlsF2NdImAQ5f0U4Uv26doFn09W+VExFwNhcXhewQUuPBYBr+XXzdww==</SignatureValue><KeyInfo><X509Data><X509Certificate>MIIDIzCCAg+gAwIBAgIQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAMCQxIjAgBgNVBAMTGUtlbnRvci5BdXRoU2VydmljZXMuVGVzdHMwHhcNMTMwOTI1MTMzNTQ0WhcNMzkxMjMxMjM1OTU5WjAkMSIwIAYDVQQDExlLZW50b3IuQXV0aFNlcnZpY2VzLlRlc3RzMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwVGpfvK9N//MnA5Jo1q2liyPR24406Dp25gv7LB3HK4DWgqsb7xXM6KIV/WVOyCV2g/O1ErBlB+HLhVZ4XUJvbqBbgAJqFO+TZwcCIe8u4nTEXeU660FdtkKClA17sbtMrAGdDfOPwVBHSuavdHeD7jHNI4RUDGKnEW13/0EvnHDilIetwODRxrX/+41R24sJThFbMczByS3OAL2dcIxoAynaGeM90gXsVYow1QhJUy21+cictikb7jW4mW6dvFCBrWIceom9J295DcQIHoxJy5NoZwMir/JV00qs1wDVoN20Ve1DC5ImwcG46XPF7efQ44yLh2j5Yexw+xloA81dwIDAQABo1kwVzBVBgNVHQEETjBMgBAWIahoZhXVUogbAqkS7zwfoSYwJDEiMCAGA1UEAxMZS2VudG9yLkF1dGhTZXJ2aWNlcy5UZXN0c4IQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAA4IBAQA2aGzmuKw4AYXWMhrGj5+i8vyAoifUn1QVOFsUukEA77CrqhqqaWFoeagfJp/45vlvrfrEwtF0QcWfmO9w1VvHwm7sk1G/cdYyJ71sU+llDsdPZm7LxQvWZYkK+xELcinQpSwt4ExavS+jLcHoOYHYwIZMBn3U8wZw7Kq29oGnoFQz7HLCEl/G9i3QRyvFITNlWTjoScaqMjHTzq6HCMaRsL09DLcY3KB+cedfpC0/MBlzaxZv0DctTulyaDfM9DCYOyokGN/rQ6qkAR0DDm8fVwknbJY7kURXNGoUetulTb5ow8BvD1gncOaYHSD0kbHZG+bLsUZDFatEr2KW8jbG</X509Certificate></X509Data></KeyInfo></Signature><Subject><NameID>SomeUser</NameID><SubjectConfirmation Method=""urn:oasis:names:tc:SAML:2.0:cm:bearer"" /></Subject><Conditions NotOnOrAfter=""2100-01-01T05:00:00.000Z"" /></Assertion>";
+                @"<Assertion ID=""Saml2Response_GetClaims_DoesNotThrowSha256MessageForOtherProblem_Assertion"" IssueInstant=""2015-03-13T20:43:07.330Z"" Version=""2.0"" xmlns=""urn:oasis:names:tc:SAML:2.0:assertion""><Issuer>https://idp.example.com</Issuer><Signature xmlns=""http://www.w3.org/2000/09/xmldsig#""><SignedInfo><CanonicalizationMethod Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /><SignatureMethod Algorithm=""http://www.w3.org/2000/09/xmldsig#rsa-sha1"" /><Reference URI=""#Saml2Response_GetClaims_DoesNotThrowSha256MessageForOtherProblem_Assertion""><Transforms><Transform Algorithm=""http://www.w3.org/2000/09/xmldsig#enveloped-signature"" /><Transform Algorithm=""http://www.w3.org/2001/10/xml-exc-c14n#"" /></Transforms><DigestMethod Algorithm=""http://www.w3.org/2001/04/xmlenc#sha256"" /><DigestValue>F+E7u3vqMC07ipvP9AowsMqP7y6CsAC0GeEIxNSwDEI=</DigestValue></Reference></SignedInfo><SignatureValue>GmiXn24Ccnr64TbmDd1/nLM+891z0FtRHSpU8+75uOqbpNK/ZZGrltFf2YZ5u9b9O0HfbFFsZ0i28ocwAZOv2UfxQrCtOGf3ss7Q+t2Zmc6Q/3ES7HIa15I5BbaSdNfpOMlX6N1XXhMprRGy2YWMr5IAIhysFG1A2oHaC3yFiesfUrawN/lXUYuI22Kf4A5bmnIkKijnwX9ewnhRj6569bw+c6q+tVZSHQzI+KMU9KbKN4NsXxAmv6dM1w2qOiX9/CO9LzwEtlhA9yo3sl0uWP8z5GwK9qgOlsF2NdImAQ5f0U4Uv26doFn09W+VExFwNhcXhewQUuPBYBr+XXzdww==</SignatureValue><KeyInfo><X509Data><X509Certificate>MIIDIzCCAg+gAwIBAgIQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAMCQxIjAgBgNVBAMTGUtlbnRvci5BdXRoU2VydmljZXMuVGVzdHMwHhcNMTMwOTI1MTMzNTQ0WhcNMzkxMjMxMjM1OTU5WjAkMSIwIAYDVQQDExlLZW50b3IuQXV0aFNlcnZpY2VzLlRlc3RzMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwVGpfvK9N//MnA5Jo1q2liyPR24406Dp25gv7LB3HK4DWgqsb7xXM6KIV/WVOyCV2g/O1ErBlB+HLhVZ4XUJvbqBbgAJqFO+TZwcCIe8u4nTEXeU660FdtkKClA17sbtMrAGdDfOPwVBHSuavdHeD7jHNI4RUDGKnEW13/0EvnHDilIetwODRxrX/+41R24sJThFbMczByS3OAL2dcIxoAynaGeM90gXsVYow1QhJUy21+cictikb7jW4mW6dvFCBrWIceom9J295DcQIHoxJy5NoZwMir/JV00qs1wDVoN20Ve1DC5ImwcG46XPF7efQ44yLh2j5Yexw+xloA81dwIDAQABo1kwVzBVBgNVHQEETjBMgBAWIahoZhXVUogbAqkS7zwfoSYwJDEiMCAGA1UEAxMZS2VudG9yLkF1dGhTZXJ2aWNlcy5UZXN0c4IQg7mOjTf994NAVxZu4jqXpzAJBgUrDgMCHQUAA4IBAQA2aGzmuKw4AYXWMhrGj5+i8vyAoifUn1QVOFsUukEA77CrqhqqaWFoeagfJp/45vlvrfrEwtF0QcWfmO9w1VvHwm7sk1G/cdYyJ71sU+llDsdPZm7LxQvWZYkK+xELcinQpSwt4ExavS+jLcHoOYHYwIZMBn3U8wZw7Kq29oGnoFQz7HLCEl/G9i3QRyvFITNlWTjoScaqMjHTzq6HCMaRsL09DLcY3KB+cedfpC0/MBlzaxZv0DctTulyaDfM9DCYOyokGN/rQ6qkAR0DDm8fVwknbJY7kURXNGoUetulTb5ow8BvD1gncOaYHSD0kbHZG+bLsUZDFatEr2KW8jbG</X509Certificate></X509Data></KeyInfo></Signature><Subject><NameID>SomeUser</NameID><SubjectConfirmation Method=""urn:oasis:names:tc:SAML:2.0:cm:bearer"" /></Subject><Conditions NotOnOrAfter=""2100-01-01T05:00:00.000Z"" /></Assertion>";
 
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
 
-            xmlDoc.DocumentElement.Invoking(x => x.IsSignedBy(SignedXmlHelper.TestCert))
+            xmlDoc.DocumentElement.Invoking(x => x.IsSignedByAny(
+                Enumerable.Repeat(new StubKeyIdentifier(), 1), false, SignedXml.XmlDsigRSASHA1Url))
                 .ShouldThrow<CryptographicException>()
-                .WithMessage("SignatureDescription could not be created for the signature algorithm supplied.");
+                .WithMessage("Stub*");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_IsSignedBy_ChecksSigningAlgorithmStrength()
+        {
+            var xml = "<xml ID=\"MyXml\" />";
+
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
+            var sx = new SignedXml(xmlDoc);
+
+            var reference = new Reference
+            {
+                Uri = "#MyXml",
+                DigestMethod = SignedXml.XmlDsigSHA256Url
+            };
+            reference.AddTransform(new XmlDsigExcC14NTransform());
+            reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
+            sx.AddReference(reference);
+            sx.SigningKey = ((RSACryptoServiceProvider)SignedXmlHelper.TestCert.PrivateKey)
+                .GetSha256EnabledRSACryptoServiceProvider();
+
+            sx.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA1Url;
+            sx.ComputeSignature();
+            xmlDoc.DocumentElement.AppendChild(sx.GetXml());
+
+            var keyClause = new X509RawDataKeyIdentifierClause(SignedXmlHelper.TestCert);
+            
+            xmlDoc.DocumentElement.Invoking(x =>
+            x.IsSignedByAny(Enumerable.Repeat(keyClause, 1), false, SignedXml.XmlDsigRSASHA256Url))
+            .ShouldThrow<InvalidSignatureException>()
+            .WithMessage("*signing*weak*");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_IsSignedBy_ChecksDigestAlgorithmStrength()
+        {
+            var xml = "<xml ID=\"MyXml\" />";
+
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
+            var sx = new SignedXml(xmlDoc);
+
+            var reference = new Reference
+            {
+                Uri = "#MyXml",
+                DigestMethod = SignedXml.XmlDsigSHA1Url
+            };
+            reference.AddTransform(new XmlDsigExcC14NTransform());
+            reference.AddTransform(new XmlDsigEnvelopedSignatureTransform());
+            sx.AddReference(reference);
+            sx.SigningKey = ((RSACryptoServiceProvider)SignedXmlHelper.TestCert.PrivateKey)
+                .GetSha256EnabledRSACryptoServiceProvider();
+
+            sx.SignedInfo.SignatureMethod = SignedXml.XmlDsigRSASHA256Url;
+            sx.ComputeSignature();
+            xmlDoc.DocumentElement.AppendChild(sx.GetXml());
+
+            var keyClause = new X509RawDataKeyIdentifierClause(SignedXmlHelper.TestCert);
+
+            xmlDoc.DocumentElement.Invoking(x =>
+            x.IsSignedByAny(Enumerable.Repeat(keyClause, 1), false, SignedXml.XmlDsigRSASHA256Url))
+            .ShouldThrow<InvalidSignatureException>()
+            .WithMessage("*digest*weak*");
         }
 
         [TestMethod]
@@ -357,14 +457,205 @@ $@"<xml>
         {
             var xml = "<xml ID=\"MyXml\" />";
 
-            var xmlDoc = XmlHelpers.FromString(xml);
+            var xmlDoc = XmlHelpers.XmlDocumentFromString(xml);
             xmlDoc.Sign(SignedXmlHelper.TestCert, false);
 
             var signingKeys = Enumerable.Repeat(SignedXmlHelper.TestKey, 1);
 
-            xmlDoc.DocumentElement.Invoking(x => x.IsSignedByAny(signingKeys, true))
+            xmlDoc.DocumentElement.Invoking(x => x.IsSignedByAny(signingKeys, true, SignedXml.XmlDsigRSASHA1Url))
                 .ShouldThrow<InvalidOperationException>()
                 .And.Message.Should().Be("Certificate validation enabled, but the signing key identifier is of type RsaKeyIdentifierClause which cannot be validated as a certificate.");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmpty_Adds()
+        {
+            var e = new XElement("xml");
+
+            e.AddAttributeIfNotNullOrEmpty("attribute", "value");
+
+            e.Attribute("attribute").Should().NotBeNull().And.Subject.Value
+                .Should().Be("value");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmpty_IgnoresEmpty()
+        {
+            var e = new XElement("xml");
+
+            e.AddAttributeIfNotNullOrEmpty("attribute", "");
+
+            e.Attribute("attribute").Should().BeNull();
+        }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmpty_HandlesNamespace()
+        {
+            var e = new XElement("xml");
+
+            var ns = XNamespace.Get("someNamespace");
+
+            e.AddAttributeIfNotNullOrEmpty(ns + "attribute", "");
+
+            e.Attribute(ns + "attribute").Should().BeNull();
+        }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmpty_IgnoresNull()
+        {
+            var e = new XElement("xml");
+
+            e.AddAttributeIfNotNullOrEmpty("attribute", null);
+
+            e.Attribute("attribute").Should().BeNull();
+        }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmpty_HandlesUri()
+        {
+            var e = new XElement("xml");
+
+            string uri = "http://some.example.com/";
+            e.AddAttributeIfNotNullOrEmpty("attribute", new Uri(uri));
+
+            e.Attribute("attribute").Should().NotBeNull().And.Subject.Value.Should().Be(uri);
+        }
+
+        class EmptyToString { public override string ToString() { return string.Empty; } }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmpty_IgnoresObjectWithEmptyToString()
+        {
+            var e = new XElement("xml");
+
+            e.AddAttributeIfNotNullOrEmpty("attribute", new EmptyToString());
+
+            e.Attribute("attribute").Should().BeNull();
+        }
+
+        [TestMethod]
+        public void XmlHelpers_AddAttributeIfNotNullOrEmtpy_TimeSpanSerializedCorrectly()
+        {
+            // It might be tempting in the implementation to call value.ToString()
+            // instead of passing in the value. That would make types that have
+            // special XML Serialization formats fail. This test ensures that
+            // nobody takes that shortcut without handling the special cases.
+
+            var e = new XElement("xml");
+
+            e.AddAttributeIfNotNullOrEmpty("attribute", new TimeSpan(2, 17, 32));
+
+            e.Attribute("attribute").Should().NotBeNull().And.Subject.Value.Should().Be("PT2H17M32S");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetValueIfNotNull_NullOnNull()
+        {
+            XmlAttribute x = null;
+            x.GetValueIfNotNull().Should().BeNull();
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetValueIfNotNull_ValueOnNotNull()
+        {
+            var xd = XmlHelpers.CreateSafeXmlDocument();
+            var a = xd.CreateAttribute("someAttribute");
+            a.Value = "SomeValue";
+
+            a.GetValueIfNotNull().Should().Be("SomeValue");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetTrimmedTextIfNotNull_ValueOnNotNull()
+        {
+            var xd = XmlHelpers.CreateSafeXmlDocument();
+            var e = xd.CreateElement("someElement");
+            e.InnerText = "\r\n     Some Text";
+
+            e.GetTrimmedTextIfNotNull().Should().Be("Some Text");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetTrimmedTextIfNotNull_NullOnNull()
+        {
+            XmlElement e = null;
+
+            e.GetTrimmedTextIfNotNull().Should().BeNull();
+        }
+
+        [TestMethod]
+        public void XmlHelpers_PrettyPrint_Nullcheck()
+        {
+            Action a = () => ((XmlElement)null).PrettyPrint();
+
+            a.ShouldThrow<ArgumentNullException>()
+                .And.ParamName.Should().Be("xml");
+        }
+
+        [TestMethod]
+        public void XmlHelpers_PrettyPrint()
+        {
+            var xmlDoc = XmlHelpers.CreateSafeXmlDocument();
+            xmlDoc.LoadXml("<a><b>c</b></a>");
+
+            var result = xmlDoc.DocumentElement.PrettyPrint();
+
+            var parsed = XmlHelpers.XmlDocumentFromString(result);
+
+            var expected = "<a>\r\n  <b>c</b>\r\n</a>";
+
+            parsed.OuterXml.Should().Be(expected);
+            // Don't change semantics.
+            parsed.DocumentElement.Should().BeEquivalentTo(xmlDoc.DocumentElement);
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetFullSigningAlgorithmName_MapsSha256()
+        {
+            var shortName = "sha256";
+
+            var expected = SignedXml.XmlDsigRSASHA256Url;
+
+            XmlHelpers.GetFullSigningAlgorithmName(shortName)
+                .Should().Be(expected);
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetFullSigningAlgorithmName_MapsSHA256()
+        {
+            var shortName = "SHA256";
+
+            var expected = SignedXml.XmlDsigRSASHA256Url;
+
+            XmlHelpers.GetFullSigningAlgorithmName(shortName)
+                .Should().Be(expected);
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetFullSigningAlgorithmName_DefaultsToSha256IfAvailable()
+        {
+            var expected = SignedXml.XmlDsigRSASHA256Url;
+
+            XmlHelpers.GetFullSigningAlgorithmName("")
+                .Should().Be(expected);
+        }
+
+        [TestMethod]
+        public void XmlHelpers_GetCorrespondingDigestAlgorithmName_Sha256()
+        {
+            XmlHelpers.GetCorrespondingDigestAlgorithm(SignedXml.XmlDsigRSASHA256Url)
+                .Should().Be(SignedXml.XmlDsigSHA256Url);
+        }
+
+        [TestMethod]
+        public void XmlHelpers_CreateSafeXmlDocument()
+        {
+            var actual = XmlHelpers.CreateSafeXmlDocument();
+
+            typeof(XmlDocument).GetField("resolver", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(actual).Should().BeNull();
+
+            actual.PreserveWhitespace.Should().BeTrue();
         }
     }
 }

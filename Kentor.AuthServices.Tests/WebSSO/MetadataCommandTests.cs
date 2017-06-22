@@ -37,6 +37,7 @@ namespace Kentor.AuthServices.Tests.WebSso
             var options = StubFactory.CreateOptions();
             options.SPOptions.DiscoveryServiceUrl = new Uri("http://ds.example.com");
             options.SPOptions.AuthenticateRequestSigningBehavior = SigningBehavior.Always;
+            options.SPOptions.OutboundSigningAlgorithm = SignedXml.XmlDsigRSASHA384Url;
             options.SPOptions.ServiceCertificates.Add(new ServiceCertificate()
             {
                 Certificate = SignedXmlHelper.TestCertSignOnly,
@@ -46,13 +47,15 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             var subject = new MetadataCommand().Run(request, options);
 
-            var payloadXml = XmlHelpers.FromString(subject.Content);
+            var payloadXml = XmlHelpers.XmlDocumentFromString(subject.Content);
 
             // Validate signature, location of it  and then drop it. It contains
             // a reference to the ID which makes it unsuitable for string matching.
             payloadXml.DocumentElement.IsSignedBy(SignedXmlHelper.TestCertSignOnly).Should().BeTrue();
             payloadXml.DocumentElement.FirstChild.LocalName.Should().Be("Signature");
             payloadXml.DocumentElement.FirstChild["KeyInfo"].Should().NotBeNull();
+            payloadXml.DocumentElement.FirstChild["SignedInfo"]["SignatureMethod"].GetAttribute("Algorithm")
+                .Should().Be(SignedXml.XmlDsigRSASHA384Url);
             payloadXml.DocumentElement.RemoveChild("Signature", SignedXml.XmlDsigNamespaceUrl);
 
             // Ignore the ID attribute, it is just filled with a GUID that can't be easily tested.
@@ -100,7 +103,7 @@ namespace Kentor.AuthServices.Tests.WebSso
             + "<ContactPerson contactType=\"technical\" />"
             + "</EntityDescriptor>";
 
-            payloadXml.Should().BeEquivalentTo(XmlHelpers.FromString(expectedXml));
+            payloadXml.Should().BeEquivalentTo(XmlHelpers.XmlDocumentFromString(expectedXml));
             subject.ContentType.Should().Be("application/samlmetadata+xml");
         }
 

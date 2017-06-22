@@ -6,6 +6,7 @@ using System.IdentityModel.Metadata;
 using FluentAssertions;
 using Kentor.AuthServices.Tests.Helpers;
 using Kentor.AuthServices.Saml2P;
+using System.Security.Cryptography.Xml;
 
 namespace Kentor.AuthServices.Tests.Configuration
 {
@@ -23,10 +24,10 @@ namespace Kentor.AuthServices.Tests.Configuration
                 KentorAuthServicesSection.Current.Metadata.WantAssertionsSigned = false;
                 KentorAuthServicesSection.Current.Metadata.AllowChange = false;
                 KentorAuthServicesSection.Current.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata = false;
+                KentorAuthServicesSection.Current.Compatibility.DisableLogoutStateCookie = false;
                 KentorAuthServicesSection.Current.Compatibility.AllowChange = false;
             }
         }
-
 
         const string entityId = "http://localhost/idp";
         const string otherEntityId = "http://something.else.com";
@@ -63,6 +64,7 @@ namespace Kentor.AuthServices.Tests.Configuration
             config.ValidateCertificates = true;
             config.Compatibility.AllowChange = true;
             config.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata = true;
+            config.Compatibility.DisableLogoutStateCookie = true;
 
             SPOptions subject = new SPOptions(KentorAuthServicesSection.Current);
             subject.ReturnUrl.Should().Be(config.ReturnUrl);
@@ -77,9 +79,12 @@ namespace Kentor.AuthServices.Tests.Configuration
             subject.NameIdPolicy.Format.Should().Be(config.NameIdPolicyElement.Format);
             subject.Organization.Should().Be(config.organization);
             subject.AuthenticateRequestSigningBehavior.Should().Be(config.AuthenticateRequestSigningBehavior);
+            subject.OutboundSigningAlgorithm.Should().Be(SignedXml.XmlDsigRSASHA256Url);
+            subject.MinIncomingSigningAlgorithm.Should().Be(SignedXml.XmlDsigRSASHA1Url);
             subject.RequestedAuthnContext.ClassRef.OriginalString.Should().Be("urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport");
             subject.RequestedAuthnContext.Comparison.Should().Be(AuthnContextComparisonType.Minimum);
             subject.Compatibility.UnpackEntitiesDescriptorInIdentityProviderMetadata.Should().BeTrue();
+            subject.Compatibility.DisableLogoutStateCookie.Should().BeTrue();
         }
 
         [TestMethod]
@@ -144,6 +149,32 @@ namespace Kentor.AuthServices.Tests.Configuration
 
             subject.MetadataCacheDuration.Should().Be(new TimeSpan(1, 0, 0));
             subject.MetadataValidDuration.Should().NotHaveValue();
+        }
+
+        [TestMethod]
+        public void SPOptions_SigningAlgorithm_DefaultValue()
+        {
+            var subject = new SPOptions();
+
+            subject.OutboundSigningAlgorithm.Should().Be(SignedXml.XmlDsigRSASHA256Url);
+        }
+
+        [TestMethod]
+        public void SPOptions_MinIncomingSigningAlgorithm_DefaultValue()
+        {
+            var subject = new SPOptions();
+
+            subject.MinIncomingSigningAlgorithm.Should().Be(SignedXml.XmlDsigRSASHA256Url);
+        }
+
+        [TestMethod]
+        public void SPOptions_MininumSigningAlgorithm_ThrowsOnUnknownAlgorithm()
+        {
+            var subject = new SPOptions();
+
+            subject.Invoking(s => s.MinIncomingSigningAlgorithm = "InvalidName")
+                .ShouldThrow<ArgumentException>()
+                .WithMessage("*unknown*not supported*");
         }
 
         [TestMethod]
@@ -514,6 +545,18 @@ namespace Kentor.AuthServices.Tests.Configuration
             var result = subject.MetadataCertificates;
             result.Count.Should().Be(1);
             result[0].Status.Should().Be(CertificateStatus.Current);
+        }
+
+        [TestMethod]
+        public void SPOptions_Saml2PSecurityTokenHandler_Setter()
+        {
+            var subject = StubFactory.CreateSPOptions();
+
+            var handler = new Saml2PSecurityTokenHandler(subject);
+
+            subject.Saml2PSecurityTokenHandler = handler;
+
+            subject.Saml2PSecurityTokenHandler.Should().BeSameAs(handler);
         }
     }
 }

@@ -21,18 +21,22 @@ namespace Kentor.AuthServices.WebSso
                 throw new ArgumentNullException(nameof(options));
             }
 
-            var urls = new AuthServicesUrls(request, options.SPOptions);
+            var urls = new AuthServicesUrls(request, options);
 
             var metadata = options.SPOptions.CreateMetadata(urls);
             options.Notifications.MetadataCreated(metadata, urls);
 
             var result = new CommandResult()
             {
-                Content = metadata.ToXmlString(options.SPOptions.SigningServiceCertificate),
+                Content = metadata.ToXmlString(
+                    options.SPOptions.SigningServiceCertificate,
+                    options.SPOptions.OutboundSigningAlgorithm),
                 ContentType = "application/samlmetadata+xml"
             };
 
             options.Notifications.MetadataCommandResultCreated(result);
+
+            options.SPOptions.Logger.WriteInformation("Created metadata");
 
             return result;
         }

@@ -87,9 +87,10 @@ namespace Kentor.AuthServices.Tests
 
             subject.ShouldBeEquivalentTo(expected, opt => opt
             .Excluding(au => au.Id)
+            .Excluding(au=>au.SigningAlgorithm)
             .Excluding(au => au.RelayState));
 
-            subject.RelayState.Should().HaveLength(56);
+            subject.RelayState.Should().HaveLength(24);
         }
 
         [TestMethod]
@@ -113,6 +114,7 @@ namespace Kentor.AuthServices.Tests
 
             subject.ShouldBeEquivalentTo(expected, opt => opt
             .Excluding(au => au.Id)
+            .Excluding(au => au.SigningAlgorithm)
             .Excluding(au => au.RelayState));
         }
 
@@ -137,6 +139,7 @@ namespace Kentor.AuthServices.Tests
 
             subject.ShouldBeEquivalentTo(expected, opt => opt
                 .Excluding(au => au.Id)
+                .Excluding(au => au.SigningAlgorithm)
                 .Excluding(au => au.RelayState));
         }
 
@@ -307,6 +310,15 @@ namespace Kentor.AuthServices.Tests
         }
 
         [TestMethod]
+        public void IdentityProvider_Ctor_NullcheckSpOptions()
+        {
+            Action a = () => new IdentityProvider(new EntityId("urn:foo"), null);
+
+            a.ShouldThrow<ArgumentNullException>()
+                .And.ParamName.Should().Be("spOptions");
+        }
+
+        [TestMethod]
         public void IdentityProvider_Ctor_MissingBindingThrows()
         {
             var config = CreateConfig();
@@ -388,10 +400,22 @@ namespace Kentor.AuthServices.Tests
         }
 
         [TestMethod]
-        public void IdentityProvider_Ctor_UseMetadataLocationUrl()
+        public void IdentityProvider_Ctor_PrefersRedirectBindingForLogout()
         {
             var config = CreateConfig();
             config.LoadMetadata = true;
+            config.EntityId = "http://localhost:13428/idpMetadataWithMultipleBindings";
+
+            var subject = new IdentityProvider(config, Options.FromConfiguration.SPOptions);
+
+            subject.SingleLogoutServiceBinding.Should().Be(Saml2BindingType.HttpRedirect);
+            subject.SingleLogoutServiceUrl.Should().Be( "http://idp2Bindings.example.com/LogoutRedirect" );
+        }
+
+        [TestMethod]
+        public void IdentityProvider_Ctor_UseMetadataLocationUrl()
+        {
+            var config = CreateConfig();
             config.MetadataLocation = "http://localhost:13428/idpMetadataDifferentEntityId";
             config.EntityId = "some-idp";
 
@@ -460,12 +484,18 @@ namespace Kentor.AuthServices.Tests
             subject.MetadataValidUntil.Should().BeCloseTo(expectedValidUntil, 1000);
         }
 
-        IdentityProvider CreateSubjectForMetadataRefresh()
+        IdentityProvider CreateSubjectForMetadataRefresh(bool setLoggerToNull = false)
         {
             var config = CreateConfig();
             config.LoadMetadata = true;
             config.EntityId = "http://localhost:13428/idpMetadataVeryShortCacheDuration";
-            return new IdentityProvider(config, Options.FromConfiguration.SPOptions);
+            var spOptions = Options.FromConfiguration.SPOptions;
+            if(setLoggerToNull)
+            {
+                spOptions = StubFactory.CreateSPOptions();
+                spOptions.Logger = null;
+            }
+            return new IdentityProvider(config, spOptions);
         }
 
         [TestMethod]
@@ -651,7 +681,7 @@ namespace Kentor.AuthServices.Tests
             MetadataRefreshScheduler.minInterval = new TimeSpan(0, 0, 0, 0, 1);
             StubServer.IdpAndFederationShortCacheDurationAvailable = false;
 
-            var subject = CreateSubjectForMetadataRefresh();
+            var subject = CreateSubjectForMetadataRefresh(true);
 
             StubServer.IdpAndFederationShortCacheDurationAvailable = true;
 
@@ -941,6 +971,17 @@ namespace Kentor.AuthServices.Tests
             subject.Invoking(s => s.CreateLogoutRequest(user))
                 .ShouldThrow<ArgumentNullException>()
                 .And.Message.Should().Be("Value cannot be null.\r\nParameter name: user");
+        }
+
+        [TestMethod]
+        public void IdentityProvider_SingleLogoutServiceResponseUrl()
+        {
+            var subject = new IdentityProvider(new EntityId("http://example.com"), StubFactory.CreateSPOptions());
+            var url = new Uri("http://some.url.example.com/logout-response");
+
+            subject.SingleLogoutServiceResponseUrl = url;
+
+            subject.SingleLogoutServiceResponseUrl.OriginalString.Should().Be(url.OriginalString);
         }
     }
 }

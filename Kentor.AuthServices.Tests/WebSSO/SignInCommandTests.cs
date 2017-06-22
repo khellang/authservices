@@ -43,47 +43,73 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             var actual = new SignInCommand().Run(httpRequest, Options.FromConfiguration);
 
-            actual.RequestState.ReturnUrl.Should().Be("http://localhost/Return.aspx");
+            actual.RequestState.ReturnUrl.Should().Be("/Return.aspx");
         }
 
         [TestMethod]
-        public void SignInCommand_Run_MapsReturnUrl_UsingPublicOrigin_AbsolutePath()
+        public void SignInCommand_Run_ChecksForLocalReturnUrl()
         {
             var defaultDestination = Options.FromConfiguration.IdentityProviders.Default.SingleSignOnServiceUrl;
+            var absoluteUri = HttpUtility.UrlEncode("http://google.com");
+            var httpRequest = new HttpRequestData("GET", new Uri($"http://localhost/signin?ReturnUrl={absoluteUri}"));
 
-            var httpRequest = new HttpRequestData(
-                "GET",
-                new Uri("http://localhost/path/signin?ReturnUrl=%2FReturn.aspx"),
-                "/localpath",
-                null,
-                null);
+            Action a = () => new SignInCommand().Run(httpRequest, Options.FromConfiguration);
 
-            var options = Options.FromConfiguration;
-            options.SPOptions.PublicOrigin = new Uri("https://externalhost/path/");
-
-            var actual = new SignInCommand().Run(httpRequest, options);
-
-            actual.RequestState.ReturnUrl.Should().Be("https://externalhost/Return.aspx");
+            a.ShouldThrow<InvalidOperationException>().WithMessage("Return Url must be a relative Url.");
         }
 
         [TestMethod]
-        public void SignInCommand_Run_MapsReturnUrl_UsingPublicOrigin_RelativePath()
+        public void SignInCommand_Run_ChecksForLocalReturnUrlProtocolRelative()
         {
             var defaultDestination = Options.FromConfiguration.IdentityProviders.Default.SingleSignOnServiceUrl;
+            var absoluteUri = HttpUtility.UrlEncode("//google.com");
+            var httpRequest = new HttpRequestData("GET", new Uri($"http://localhost/signin?ReturnUrl={absoluteUri}"));
 
-            var httpRequest = new HttpRequestData(
-                "GET",
-                new Uri("http://localhost/localpath/account/signin?ReturnUrl=Return.aspx"),
-                "/localpath",
-                null,
-                null);
+            Action a = () => new SignInCommand().Run(httpRequest, Options.FromConfiguration);
 
-            var options = Options.FromConfiguration;
-            options.SPOptions.PublicOrigin = new Uri("https://externalhost/path/");
+            a.ShouldThrow<InvalidOperationException>().WithMessage("Return Url must be a relative Url.");
+        }
 
-            var actual = new SignInCommand().Run(httpRequest, options);
+        [TestMethod]
+        public void SignInCommand_Run_Calls_NotificationForAbsoluteUrl()
+        {
+            var defaultDestination = Options.FromConfiguration.IdentityProviders.Default.SingleSignOnServiceUrl;
+            var absoluteUri = HttpUtility.UrlEncode("http://google.com");
+            var httpRequest = new HttpRequestData("GET", new Uri($"http://localhost/signin?ReturnUrl={absoluteUri}"));
+            var validateAbsoluteReturnUrlCalled = false;
 
-            actual.RequestState.ReturnUrl.Should().Be("https://externalhost/path/account/Return.aspx");
+            Options.FromConfiguration.Notifications.ValidateAbsoluteReturnUrl =
+                (url) =>
+                {
+                    validateAbsoluteReturnUrlCalled = true;
+                    return true;
+                };
+            
+            Action a = () => new SignInCommand().Run(httpRequest, Options.FromConfiguration);
+
+            a.ShouldNotThrow<InvalidOperationException>("the ValidateAbsoluteReturnUrl notification returns true");
+            validateAbsoluteReturnUrlCalled.Should().BeTrue("the ValidateAbsoluteReturnUrl notification should have been called");
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_DoNotCalls_NotificationForRelativeUrl()
+        {
+            var defaultDestination = Options.FromConfiguration.IdentityProviders.Default.SingleSignOnServiceUrl;
+            var relativeUri = HttpUtility.UrlEncode("~/Secure");
+            var httpRequest = new HttpRequestData("GET", new Uri($"http://localhost/signin?ReturnUrl={relativeUri}"));
+            var validateAbsoluteReturnUrlCalled = false;
+
+            Options.FromConfiguration.Notifications.ValidateAbsoluteReturnUrl =
+                (url) =>
+                {
+                    validateAbsoluteReturnUrlCalled = true;
+                    return true;
+                };
+
+            Action a = () => new SignInCommand().Run(httpRequest, Options.FromConfiguration);
+
+            a.ShouldNotThrow<InvalidOperationException>("the ReturnUrl is relative");
+            validateAbsoluteReturnUrlCalled.Should().BeFalse("the ValidateAbsoluteReturnUrl notification should not have been called");
         }
 
         [TestMethod]
@@ -108,7 +134,7 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             Action a = () => new SignInCommand().Run(request, Options.FromConfiguration);
 
-            a.ShouldThrow<InvalidOperationException>().WithMessage("Unknown idp");
+            a.ShouldThrow<InvalidOperationException>().WithMessage("Unknown idp no-such-idp-in-config");
         }
 
         [TestMethod]
@@ -144,15 +170,19 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             result.HttpStatusCode.Should().Be(HttpStatusCode.SeeOther);
 
+            result.SetCookieName.Should().StartWith("Kentor.");
+
+            var relayState = result.SetCookieName.Substring("Kentor.".Length);
+
             var queryString = string.Format("?entityID={0}&return={1}&returnIDParam=idp",
                 Uri.EscapeDataString(options.SPOptions.EntityId.Id),
                 Uri.EscapeDataString(
-                    "http://localhost/AuthServices/SignIn?ReturnUrl="
-                    + Uri.EscapeDataString("/Return/Path")));
+                    "http://localhost/AuthServices/SignIn?RelayState=" + relayState));
 
             var expectedLocation = new Uri(dsUrl + queryString);
 
             result.Location.Should().Be(expectedLocation);
+            result.RequestState.ReturnUrl.Should().Be("/Return/Path");
         }
 
         [TestMethod]
@@ -268,6 +298,75 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             SignInCommand.Run(null, null, request, options, null)
                 .Should().BeSameAs(notifiedCommandResult);
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_CarriesOverRelayStateOnReturnFromDS()
+        {
+            var options = StubFactory.CreateOptions();
+            var idp = options.IdentityProviders.Default;
+
+            var relayData = new Dictionary<string, string>
+            {
+                { "key", "value" }
+            };
+            var relayState = "RelayState";
+            var returnUrl = new Uri("/SignedIn", UriKind.Relative);
+            var storedRequestState = new StoredRequestState(
+                null,
+                returnUrl,
+                null,
+                relayData);
+
+            var uri = new Uri("http://sp.example.com/AuthServices/SignIn?RelayState="
+                + relayState
+                + "&idp="
+                + Uri.EscapeDataString(idp.EntityId.Id));
+
+            var request = new HttpRequestData("GET",
+                uri,
+                "/AuthServices",
+                null,
+                storedRequestState)
+            {
+                RelayState = relayState
+            };
+
+            var subject = CommandFactory.GetCommand(CommandFactory.SignInCommandName);
+
+            var actual = subject.Run(request, options);
+
+            actual.ClearCookieName.Should().Be("Kentor." + relayState, "cookie should be cleared");
+            actual.RequestState.ReturnUrl.Should().Be(returnUrl);
+            actual.RequestState.Idp.Id.Should().Be(idp.EntityId.Id);
+            actual.RequestState.RelayData.ShouldBeEquivalentTo(relayData);
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_ThrowsOnBothRelayStateAndReturnUrl()
+        {
+            var uri = new Uri("http://sp.example.com/AuthServices/SignIn?ReturnUrl=%2FLoggedIn&RelayState=state");
+
+            var request = new HttpRequestData("GET", uri);
+
+            var subject = CommandFactory.GetCommand(CommandFactory.SignInCommandName);
+
+            subject.Invoking(s => s.Run(request, StubFactory.CreateOptions()))
+                .ShouldThrow<InvalidOperationException>().
+                WithMessage("*Both*ReturnUrl*RelayState*");
+        }
+
+        [TestMethod]
+        public void SignInCommand_Run_RedirectToDsWorksWithoutSpecifiedReturnPath()
+        {
+            var options = StubFactory.CreateOptions();
+
+            var request = new HttpRequestData("GET",
+                new Uri("http://sp.example.com/AuthServices/SignIn"));
+
+            Action a = () => SignInCommand.Run(null, null, request, options, null);
+
+            a.ShouldNotThrow();
         }
     }
 }

@@ -1,14 +1,9 @@
-Version 0.18.1
-* Bug Fix: Use AuthenticationRequest event in HttpModule.
-* Don't use ClaimsPrincipal.Current in Logout Command.
-* Bug Fix: Logout over HTTP POST.
-* Bug Fix: Handle NameIdFormat on Logout.
+Version 0.21.2
+* Security fix: Flawed validation of Return URL causes Open Redirect
+* Security fix: XML External Entity Processing on .NET 4.5
+* Security fix: Malicious Idp can cause write to arbitrary files
+* Fix: Null Reference without NameIdentifier Claim.
 
-Release contains breaking changes related to logout handling, please see
-https://coding.abel.nu/2016/06/kentor-authservices-0-18-1-breaking-changes/
-
-Version 0.18.0
-* Support for Scoping
-* Notifications/callbacks
-* Bug fixes, see github milestone for complete list.
-* ADFS compatible metadata
+Version 0.21.1
+* Fix Local logout broken in v0.21.0
+* Fixes to error handling: Various error conditions have got better messages, instead of hard to understand null reference exceptions.

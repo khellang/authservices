@@ -12,6 +12,7 @@ using System.Text;
 using System.Xml;
 using System.IdentityModel.Metadata;
 using Kentor.AuthServices.Exceptions;
+using System.Security.Cryptography.Xml;
 
 namespace Kentor.AuthServices.Tests.WebSso
 {
@@ -27,7 +28,7 @@ namespace Kentor.AuthServices.Tests.WebSso
         }
 
         [TestMethod]
-        public void Saml2RedirectBinding_Unbind_NullcheckRequest()
+        public void Saml2RedirectBinding_Unbind_Nullcheck_Request()
         {
             Saml2Binding.Get(Saml2BindingType.HttpRedirect)
                 .Invoking(b => b.Unbind(null, null))
@@ -80,7 +81,7 @@ namespace Kentor.AuthServices.Tests.WebSso
 
             var result = Saml2Binding.Get(Saml2BindingType.HttpRedirect).Unbind(request, null);
 
-            var expectedXml = XmlHelpers.FromString(ExampleXmlData).DocumentElement;
+            var expectedXml = XmlHelpers.XmlDocumentFromString(ExampleXmlData).DocumentElement;
 
             result.RelayState.Should().Be(null);
             result.Data.Should().BeEquivalentTo(expectedXml);
@@ -181,7 +182,8 @@ namespace Kentor.AuthServices.Tests.WebSso
                 RelayState = includeRelayState ? "SomeState that needs escaping #%=3" : null,
                 DestinationUrl = new Uri("http://host"),
                 MessageName = messageName,
-                SigningCertificate = SignedXmlHelper.TestCert
+                SigningCertificate = SignedXmlHelper.TestCert,
+                SigningAlgorithm = SignedXml.XmlDsigRSASHA256Url
             };
 
             if(!string.IsNullOrEmpty(issuer))
@@ -268,6 +270,25 @@ namespace Kentor.AuthServices.Tests.WebSso
         }
 
         [TestMethod]
+        public void Saml2RedirectBinding_Unbind_ThrowsOnWeakSignatureAlgorithm()
+        {
+            var url = CreateAndBindMessageWithSignature().Location;
+
+            var request = new HttpRequestData("GET", url);
+
+            var options = StubFactory.CreateOptions();
+            options.SPOptions.MinIncomingSigningAlgorithm = SignedXml.XmlDsigRSASHA384Url;
+
+            // Check that the created url indeed is signed with SHA256.
+            url.OriginalString.Should().Contain("sha256");
+
+            var actual = Saml2Binding.Get(request)
+                .Invoking(b => b.Unbind(request, options))
+                .ShouldThrow<InvalidSignatureException>()
+                .WithMessage("*weak*");
+        }
+
+        [TestMethod]
         public void Saml2RedirectBinding_Unbind_ThrowsOnSignatureWithTamperedData_SAMLRequest()
         {
             var url = CreateAndBindMessageWithSignature(messageName: "SAMLRequest").Location.ToString();
@@ -311,6 +332,21 @@ namespace Kentor.AuthServices.Tests.WebSso
                 .Unbind(request, null);
 
             actual.TrustLevel.Should().Be(TrustLevel.None);
+        }
+
+        [TestMethod]
+        public void Saml2RedirectBinding_Bind_WritesLogIfLoggerNotNull()
+        {
+            var message = new Saml2MessageImplementation()
+            {
+                DestinationUrl = new Uri("http://destination"),
+                XmlData = "<xml/>"
+            };
+            var logger = Substitute.For<ILoggerAdapter>();
+
+            Saml2Binding.Get(Saml2BindingType.HttpRedirect).Bind(message, logger);
+
+            logger.Received().WriteVerbose("Sending message over Http Redirect Binding\n<xml/>");
         }
     }
 }
