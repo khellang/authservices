@@ -1,10 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25123.0
+# Visual Studio 15
+VisualStudioVersion = 15.0.26430.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kentor.AuthServices", "Kentor.AuthServices\Kentor.AuthServices.csproj", "{93BA675E-A159-4701-B68B-C4B81015C556}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{E0C4834E-A7A9-476F-8F46-B2D533190872}"
 	ProjectSection(SolutionItems) = preProject
 		CodeCoverage.runsettings = CodeCoverage.runsettings
@@ -15,10 +13,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 		VersionInfo.cs = VersionInfo.cs
 	EndProjectSection
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SampleApplication", "SampleApplication\SampleApplication.csproj", "{A8933B89-1052-43EF-A884-07860375F3FA}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kentor.AuthServices.Tests", "Kentor.AuthServices.Tests\Kentor.AuthServices.Tests.csproj", "{D3334615-C970-464F-8F45-50CB53A5C0EE}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "doc", "doc", "{DB9690FA-2519-4D70-A831-2D6705842721}"
 	ProjectSection(SolutionItems) = preProject
@@ -40,6 +34,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "nuget", "nuget", "{8EE1C45E
 		nuget\ReleaseNotes.txt = nuget\ReleaseNotes.txt
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kentor.AuthServices", "Kentor.AuthServices\Kentor.AuthServices.csproj", "{93BA675E-A159-4701-B68B-C4B81015C556}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SampleApplication", "SampleApplication\SampleApplication.csproj", "{A8933B89-1052-43EF-A884-07860375F3FA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kentor.AuthServices.Tests", "Kentor.AuthServices.Tests\Kentor.AuthServices.Tests.csproj", "{D3334615-C970-464F-8F45-50CB53A5C0EE}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kentor.AuthServices.Mvc", "Kentor.AuthServices.Mvc\Kentor.AuthServices.Mvc.csproj", "{7D32F0A3-CEC8-4DC6-A096-5905EA9C3770}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SampleMvcApplication", "SampleMvcApplication\SampleMvcApplication.csproj", "{CE07482B-C6AB-4195-A1A7-3BB69176EFF2}"
@@ -54,9 +54,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kentor.AuthServices.HttpMod
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SampleIdentityServer3", "SampleIdentityServer3\SampleIdentityServer3.csproj", "{D4B36D49-D994-48AC-AC1F-7A2AA49BDF0B}"
 EndProject
-Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "Kentor.AuthServices.AspNetCore", "Kentor.AuthServices.AspNetCore\Kentor.AuthServices.AspNetCore.xproj", "{E4F5A9E4-296D-4619-90BD-C939A03DCD2A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kentor.AuthServices.AspNetCore", "Kentor.AuthServices.AspNetCore\Kentor.AuthServices.AspNetCore.csproj", "{E4F5A9E4-296D-4619-90BD-C939A03DCD2A}"
 EndProject
-Project("{8BB2217D-0F2D-49D1-97BC-3654ED321F3B}") = "SampleAspNetCoreApplication", "SampleAspNetCoreApplication\SampleAspNetCoreApplication.xproj", "{4F644542-A5FE-4F79-991E-54AB05B26CDA}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SampleAspNetCoreApplication", "SampleAspNetCoreApplication\SampleAspNetCoreApplication.csproj", "{4F644542-A5FE-4F79-991E-54AB05B26CDA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
